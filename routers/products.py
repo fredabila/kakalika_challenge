@@ -161,9 +161,9 @@ async def create_product(
     product_payload = {
         "farmer_id": farmer_profile["id"],
         "crop_type": crop_type.strip(),
-        "quantity": quantity,
+        "quantity": float(quantity),
         "unit": unit.strip() or "kg",
-        "price_per_unit": price_per_unit,
+        "price_per_unit": float(price_per_unit),
         "image_url": public_url,
         "location": f"SRID=4326;POINT({location_lng} {location_lat})",
     }
