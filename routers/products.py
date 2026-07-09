@@ -156,6 +156,7 @@ async def create_product(
     except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover - network/client failures depend on Supabase runtime
+        print(f"DEBUG - image upload error: {exc}")
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to upload product image") from exc
 
     product_payload = {

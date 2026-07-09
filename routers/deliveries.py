@@ -139,9 +139,84 @@ def _get_driver_profile(authorization: Optional[str]) -> tuple[dict[str, Any], A
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid user profile")
 
     if profile.get("role") != "driver":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only drivers can update delivery status")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only drivers can access this endpoint")
 
     return profile, authed_supabase
+
+
+@router.post("/drivers/profile", status_code=status.HTTP_201_CREATED)
+async def create_driver_profile(
+    vehicle_type: str = Form(..., min_length=1),
+    load_capacity_kg: float = Form(..., gt=0),
+    authorization: Optional[str] = Header(default=None, alias="Authorization", description="Bearer access token"),
+):
+    driver_profile, authed_supabase = _get_driver_profile(authorization)
+    driver_id = driver_profile["id"]
+
+    try:
+        existing_response = authed_supabase.table("driver_details").select("profile_id").eq("profile_id", str(driver_id)).limit(1).execute()
+    except Exception as exc:  # pragma: no cover - network/client failures depend on Supabase runtime
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to check driver profile") from exc
+
+    existing_rows = getattr(existing_response, "data", None) or []
+    if existing_rows:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Driver profile already set up")
+
+    driver_payload = {
+        "profile_id": str(driver_id),
+        "vehicle_type": vehicle_type.strip(),
+        "load_capacity_kg": float(load_capacity_kg),
+        "is_available": False,
+        "current_location": None,
+    }
+
+    try:
+        response = authed_supabase.table("driver_details").insert(driver_payload).select("*").execute()
+    except Exception as exc:  # pragma: no cover - network/client failures depend on Supabase runtime
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to create driver profile") from exc
+
+    created_rows = getattr(response, "data", None) or []
+    created_driver = created_rows[0] if created_rows else None
+    if not created_driver:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Driver profile was not returned after creation")
+
+    return created_driver
+
+
+@router.patch("/drivers/availability")
+async def update_driver_availability(
+    is_available: bool = Form(...),
+    current_lat: Optional[float] = Form(default=None),
+    current_lng: Optional[float] = Form(default=None),
+    authorization: Optional[str] = Header(default=None, alias="Authorization", description="Bearer access token"),
+):
+    driver_profile, authed_supabase = _get_driver_profile(authorization)
+    driver_id = driver_profile["id"]
+
+    try:
+        existing_response = authed_supabase.table("driver_details").select("*").eq("profile_id", str(driver_id)).limit(1).execute()
+    except Exception as exc:  # pragma: no cover - network/client failures depend on Supabase runtime
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Unable to load driver profile") from exc
+
+    existing_rows = getattr(existing_response, "data", None) or []
+    if not existing_rows:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver profile not found. Please complete your driver profile first.")
+
+    update_payload = {"is_available": is_available}
+    if current_lat is not None and current_lng is not None:
+        update_payload["current_location"] = f"SRID=4326;POINT({current_lng} {current_lat})"
+
+    try:
+        response = authed_supabase.table("driver_details").update(update_payload).eq("profile_id", str(driver_id)).select("*").execute()
+    except Exception as exc:  # pragma: no cover - network/client failures depend on Supabase runtime
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to update driver availability") from exc
+
+    updated_rows = getattr(response, "data", None) or []
+    updated_driver = updated_rows[0] if updated_rows else None
+    if not updated_driver:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Driver availability was not returned after update")
+
+    return updated_driver
 
 
 @router.post("/deliveries", status_code=status.HTTP_201_CREATED)
