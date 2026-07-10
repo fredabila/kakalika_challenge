@@ -55,6 +55,21 @@ def _create_user_client(authorization: Optional[str]):
     return create_client(supabase_url, supabase_key, options=ClientOptions(headers={"Authorization": authorization}))
 
 
+def _get_admin_client():
+    """Service-role client that bypasses RLS. Same pattern as get_farmer_token.py's
+    get_admin_client() — only ever use this for writes the backend has already
+    authorized (e.g. after independently verifying payment with Paystack), never
+    to satisfy a user-facing read/write that RLS should be gating."""
+    supabase_url = os.environ.get("SUPABASE_URL")
+    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not service_role_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase service-role client is not configured. Set SUPABASE_SERVICE_ROLE_KEY in the environment.",
+        )
+    return create_client(supabase_url, service_role_key)
+
+
 def _paystack_secret_key() -> str:
     key = os.environ.get("PAYSTACK_SECRET_KEY")
     if not key:
@@ -117,7 +132,7 @@ async def initiate_payment(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
     if order.get("buyer_id") != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot pay for someone else's order")
-    if order.get("status") != "pending":
+    if order.get("status") != "pending_payment":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Order status is '{order.get('status')}' and cannot be paid",
@@ -170,8 +185,9 @@ async def initiate_payment(
     if not authorization_url or not reference:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Paystack response missing authorization_url or reference")
 
+    admin_supabase = _get_admin_client()
     try:
-        authed_supabase.table("orders").update({"payment_reference": reference}).eq("id", str(order_id)).execute()
+        admin_supabase.table("orders").update({"payment_reference": reference}).eq("id", str(order_id)).execute()
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to store payment reference") from exc
 
@@ -229,10 +245,28 @@ async def verify_payment(
         return {"paid": False, "status": tx_status, "order_id": order["id"]}
 
     # Only advance a pending order — never regress a further-progressed one.
-    if order.get("status") == "pending":
+    # Written via the admin client: this is the one place the backend is allowed
+    # to set paid_escrow, and only after independently verifying with Paystack
+    # above — a buyer's own RLS-scoped client must never be able to do this write.
+    if order.get("status") == "pending_payment":
+        admin_supabase = _get_admin_client()
         try:
-            authed_supabase.table("orders").update({"status": "paid_escrow"}).eq("id", str(order["id"])).eq("status", "pending").execute()
+            update_response = (
+                admin_supabase.table("orders")
+                .update({"status": "paid_escrow"})
+                .eq("id", str(order["id"]))
+                .eq("status", "pending_payment")
+                .select("id")
+                .execute()
+            )
         except Exception as exc:  # pragma: no cover
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to update order status") from exc
+
+        updated_rows = getattr(update_response, "data", None) or []
+        if not updated_rows:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Order status update affected no rows; order may have been modified concurrently",
+            )
 
     return {"paid": True, "status": tx_status, "order_id": order["id"]}

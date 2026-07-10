@@ -113,17 +113,17 @@ export function Spinner({ className = "h-5 w-5" }: { className?: string }) {
 
 const statusStyles: Record<string, string> = {
   // orders
-  pending: "bg-amber-100 text-amber-800",
-  paid: "bg-emerald-100 text-emerald-800",
+  pending_payment: "bg-amber-100 text-amber-800",
   paid_escrow: "bg-emerald-100 text-emerald-800",
-  assigned: "bg-blue-100 text-blue-800",
-  "in-transit": "bg-indigo-100 text-indigo-800",
+  awaiting_transport: "bg-blue-100 text-blue-800",
+  completed: "bg-teal-100 text-teal-800",
+  // orders + deliveries (shared status strings)
+  in_transit: "bg-indigo-100 text-indigo-800",
+  delivered: "bg-brand-100 text-brand-800",
   cancelled: "bg-red-100 text-red-700",
   // deliveries
   driver_assigned: "bg-blue-100 text-blue-800",
   arrived_at_farm: "bg-violet-100 text-violet-800",
-  in_transit: "bg-indigo-100 text-indigo-800",
-  delivered: "bg-brand-100 text-brand-800",
   // products
   available: "bg-brand-100 text-brand-800",
   unavailable: "bg-slate-200 text-slate-600",
