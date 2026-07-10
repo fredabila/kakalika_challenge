@@ -1,1 +1,1 @@
-from . import deliveries, logistics, products, orders, ussd
+from . import deliveries, logistics, orders, payments, products,ussd

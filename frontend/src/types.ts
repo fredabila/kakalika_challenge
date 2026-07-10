@@ -3,12 +3,12 @@
 export type UserRole = "farmer" | "buyer" | "driver";
 
 export type OrderStatus =
-  | "pending"
-  | "paid"
+  | "pending_payment"
   | "paid_escrow"
-  | "assigned"
-  | "in-transit"
+  | "awaiting_transport"
+  | "in_transit"
   | "delivered"
+  | "completed"
   | "cancelled";
 
 export type DeliveryStatus =
